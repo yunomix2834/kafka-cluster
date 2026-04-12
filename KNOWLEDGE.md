@@ -1,494 +1,1081 @@
-Kafka là gì
-- là nên tảng lưu trữ, xử lý sự kiện phân tán -> sinh ra để thu thập, lưu trữ, xử lý dữ liệu khổng lồ tại thời gian thực
-- hệ thống kinh trung ương phức tạp trong dịch vụ giúp các dịch vụ có thể nói chuyện được với nhau trong một hệ thống phức tạp -> thông qua dòng chảy dữ liệu nhanh, tin cậy, khả năng mở rộng gần như vô 
 
+# Kafka Toàn Tập: Kiến Trúc, Hiệu Năng, Độ Tin Cậy, Bảo Mật và Vận Hành
 
-Message & Topic
-- Message -> đơn vị nhỏ nhất trong Kafka, tương tự như một bản ghi trong cơ sở dữ liệu. Một message sẽ có 1 key để định danh, value để chứa thông tin và header để mang các thông tin
--> Nếu hệ thống là một dòng máu thì message là tế bào dữ liệu - nhỏ bé nhưng mang thông tin sống 
+> **Mục tiêu tài liệu**  
+> Tài liệu này hệ thống hóa lại nội dung ghi chú về Kafka theo bố cục rõ ràng, có phân cấp tiêu đề, bảng tổng hợp và các phần lưu ý quan trọng để dễ học, dễ tra cứu và dễ tái sử dụng.
 
-Topic
-- Một danh mục hoặc thư mục được đặt tên để tổ chức và lưu trữ các message
+---
 
-Hành trình dữ liệu
-- Một hệ thống bên (Producer) sẽ tạo 1 message mới -> sẽ gửi message vào Topic cụ thể (cũng giống như lưu 1 tệp vào đúng thư mục)
+# 1. Kafka là gì?
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+## 1.1. Định nghĩa
 
-Partition
-- Câu hỏi làm thế nào để Kafka xử lý hàng triệu message mà không bị "nghẹt" -> Partition
-- Mỗi Topic được chia thành nhiều partition -> xử lý song song
+Kafka là **nền tảng lưu trữ và xử lý sự kiện phân tán** (distributed event streaming platform), được sinh ra để:
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+- Thu thập dữ liệu khổng lồ theo thời gian thực.
+- Lưu trữ dữ liệu bền vững.
+- Xử lý và truyền dữ liệu với độ trễ thấp.
+- Kết nối các dịch vụ trong một hệ thống phân tán phức tạp.
 
-Xử lý rất nhiều producer, hỗ trợ nhiều consumer, dữ liệu được thiết kế lưu trên đĩa, thiết kế để mở rộng theo chiều ngang 
+### 1.1.1. Hình dung trực quan
 
-Producer: tạo các message, gộp chúng lại và gửi đến topic -> mỗi topic được chia thành nhiều partition -> partition được phân tán trên nhiều cụm máy chủ (broker)
--> gộp các tin nhắn lại -> giảm tải qua các mạng
--> tự động cân bằng tải qua các partition
+Nếu cả hệ thống là **một dòng máu**, thì Kafka là **hệ thần kinh trung ương** giúp các dịch vụ “nói chuyện” với nhau thông qua một dòng chảy dữ liệu:
 
-Consumer: đọc tin nhắn từ Producer. Tập hợp lại thành các consumer group. Đọc tin nhắn từ 1 hoặc nhiều partition khác nhau
--> Không trùng lặp, mỗi tin nhắn được xử lý chính xác 1 lần, không xót
+- Nhanh
+- Tin cậy
+- Có khả năng mở rộng rất lớn
 
-Cluster: một nhóm các máy chủ (broker) làm việc cùng với nhau. Mỗi broker giữ 1 hần dữ liệu -> cùng với nhau và phối hợp để cung cấp khả năng dự phòng
--> Các partition không chỉ được phân tán mà còn được replicate qua các partition khác nhau
--> Một máy chủ gặp sự cô -> hệ thống vẫn tiếp tục chạy mà không mất dữ liệu
+> **Lưu ý:** Kafka không chỉ là một message queue thông thường. Kafka là một nền tảng streaming có khả năng lưu trữ lâu dài, xử lý song song và tích hợp mạnh với hệ sinh thái dữ liệu thời gian thực. fileciteturn3file0L1-L6
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Vid 3
+---
 
-Kafka có thể xử lý hàng triệu tin nhắn mỗi giây ?
-2 trụ cột hiệu năng
+# 2. Các khái niệm cốt lõi
 
-- Sequential I/O (ghi tuần tự)
--> với cách ghi ngẫu nhiên, đầu đọc ổ cứng sẽ liên tục di chuyên giống hệt thủ thư một thư viện chạy khắp thư viện để cất 
--> ghi tuần tự: ghi nối tiếp vào các file -> đọc đầu của ổ cứng không cần nhảy lung tung nữa -> tối ưu hóa tốc độ phần cứng
+## 2.1. Message và Topic
 
-- Zero copy (Không sao chép trung gian)
--> khi mà sao chép dữ liệu từ vùng nhớ này sang vùng nhớ khác -> cpu lại phải làm việc. Và chỉ cần độ trễ vài ms mà cộng dồn lại -> lớn. dữ liệu phải liên tục qua lại 2 không gian riêng biêt: không gian của hệ điều hành (Kernel context) và không gian của Kafka (Application context). Co 4 lan sao chep khong hieu qua:
-Buoc 1:  Dia sang bo dem HDH -> Buoc 2: HDH sang bo dem App -> Buoc 3: app sang bo dem socket -> Buoc 4: socket sang card mang
--> Voi zero copy: hdh gui du lieu truc tiep tu bo dem dia den thang card mang. Lenh he thong sendfile(): lenh he tho cho phep du lieu duoc chuyen truc tiep giua 2 file trong kernel, bo qua ung dung
+### 2.1.1. Message là gì?
 
-tieu chi | khong co zero copy | co zero copy
-sao chep | nhieu lan (OS & App) | Truc tiep (Dia -> Mang)
-ket qua | cpu tai cao, tre lon | nhanh hon, it ganh nang
+**Message** là đơn vị dữ liệu nhỏ nhất trong Kafka, tương tự như một bản ghi trong cơ sở dữ liệu.
 
--> it hon la nhieu hon
-ghi tuan tu (giam thoi gian tim kiem cua dia) -> struyen du lieu truc tiep (giam tai cho CPU) --> cuc ky hieu qua
+Một message thường gồm:
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Vid 4 
+| Thành phần | Ý nghĩa |
+|---|---|
+| Key | Khóa định danh, thường dùng để quyết định partition |
+| Value | Nội dung chính của dữ liệu |
+| Header | Thông tin bổ sung (metadata) |
 
-1. xu ly & phan tich log: ung dung nen tang -> Log tu cac microservice duoc tap trung qua Kafka de phan tich
-Observability, Log streaming, centralized logging
-2. luong du lieu goi y: Moi hanh vi cua nguoi dung -> tat ca deu dc ghi lai thanh 1 luong su kien -> do vao kafka -> duoc xu ly nhu Flink -> mom cho cac du lieu hoc may
-3. giam sat, canh bao he thong: moi dich vu trong he thong se lien tuc bao cao cac chi so va hieu nang cho Kafka -> day sang Flink de phan tich -> neu co bat thuong thi canh bao som
-4. bat thay doi du lieu: Change Data Capture
--> thay doi o nguon: moi thay doi xay ra trong co so du lieu nguon -> kafka bat su kien: kafka bat thay doi nay tu transaction log -> truyen di: su kien thay doi duoc truyen den nhieu he thong dich -> cap nhat tuc thi: tat ca cac he thong duoc cap nhat theo thoi gian thuc
--> dam bao moi thay doi duoc dong bo tren toan he sinh thai
-5. di chuyen he thong: nang cap an toan: he thong cu co the gui toan bo du lieu vao kafka -> he thong moi cu tu tu lay du lieu tu trong kafka ra. Ca 2 co the chay song song va khong giam chan len nhau ->
+> **Hình dung:** Nếu hệ thống là một dòng máu, thì message là **tế bào dữ liệu** — nhỏ bé nhưng mang thông tin sống.
 
+### 2.1.2. Topic là gì?
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Vid 5
+**Topic** là một danh mục hoặc “thư mục” được đặt tên để tổ chức và lưu trữ các message.
 
-- Kafka co that su khong bao gio mat message khong ?
-- Shaky cluster -> Fortied cluster
+Ví dụ:
 
-- Hanh trinh message: Tu producer, qua Broker, den Consumer va rui ro tiem an
+- `user-events`
+- `payment-transactions`
+- `application-logs`
 
-Rui ro 1:
-- Producer: giai doan 1: application thread tao message -> giai doan 2: record accumulator (hang doi) giu message -> giai doan 3: sender thread gui message
-- Rui ro nam trong record accumulator: ung dung dot ngot bi dung khi o trong hang cho -> mat luon message
+### 2.1.3. Hành trình dữ liệu cơ bản
 
-producer -> cau hinh| muc dich                                               -> consumer
-                        acks=all | cho xac nhan tu tat ca cac replica
-                        retires > 0 | tu dong gui lai khi co loi
-                        idempotent | ngan chan cac message trung lap
+1. Một hệ thống bên ngoài (**Producer**) tạo ra message.
+2. Producer gửi message vào một **topic cụ thể**.
+3. Message được lưu vào topic tương ứng, giống như lưu một tệp vào đúng thư mục.
 
+---
 
-Rui ro 2: 
-- Ghi du lieu vao RAM truoc (sieu nhanh) -> roi moi tu tu ghi xuong dia -> rui ro nam o day
--> RAM gap su co -> du lieu boc hoi
--> rui ro con nam o viec sao chep du lieu: leader gap su co truoc khi cac follower kip replica thi message mat
--> giai phap: co it nhat 3 ban sao cho 1 partition du lieu
-cau hinh min.in-sync.replica
-theo doi ban sau co bi lac hau khong
-=> Kafka rat nhanh nhung toc do di kem voi rui ro neu do ben du lieu khong duoc kiem soat
--> rủi ro thứ 3: dien ra o consumer. O consumer thi co 1 cai de danh dau la offset de biet no da doc den dau roi: auto commit (Kafka se tu dong doi bookmark di khong can biet logic xu ly da xong hay chua) -> rui ro neu ung dung sap ngay sau bookmark da duoc gui di nhung chua xu ly -> message se bi bo lo mai mai, manual commit (toan kiem quyen soat, chi doi bookmark khi nao cong viec hoan thanh). Chien luoc thong minh: ket hop async commit, khi co loi xay ra thi dung sync, con voi nhung message ma bi loi mai thi gui vao hang cho rieng la dead-letter queue
+## 2.2. Partition
 
--> Message co the khong bi xoa, nhung co hoi xu ly no co the bien mat -> do cung la mot dang mat du lieu
+### 2.2.1. Vì sao cần partition?
 
+Câu hỏi quan trọng là:
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+**Kafka làm thế nào để xử lý hàng triệu message mà không bị “nghẹt”?**
 
-Vid 6
-Chuyen gi se xay ra khi 1 broker ngung hoat dong-
+Câu trả lời là: **Partition**.
 
-Cum Kafka & tinh san sang cao
+Mỗi topic được chia thành nhiều partition để:
 
-- Kafka dc sinh ra vs triet ly cot loi: chiu loi va hoat dong lien tuc. HA khong phai la tinh nang dc them vao sau nay ma la nen tang Kafka
-- Cum dc tao thanh nhieu Broker. Dung dau chi huy tat ca la Controller, du lieu chi nho thanh cac partition -> xu ly song song va sao chep hieu qua nhat
-Ngay xua kien truc cu Kafka dung Zookeeper ben ngoai de dieu phoi, ha tang phuc tap hon con bay gio thi dung KRaft (mot kien truc moi) tich hop thang vao Controller, don gian va nhanh hon -> lam cho he thong don gian hon, nhanh hon, do tre giam di dang ke
--> Kafka dang dan loai bo he thong ben ngoai de tro thanh he thong dang tin cay hon
+- Cho phép ghi song song
+- Cho phép đọc song song
+- Phân tán tải
+- Tăng khả năng mở rộng ngang
 
-ISR: tap hop cac ban sao da dong bo hoan toan voi leader, san sang de duoc bau chon lam leader
-He so sao chep vang la 3: 
+### 2.2.2. Ý nghĩa thực tiễn của partition
 
-Failover: tu phuc hoi
-Buoc 1: Hoat dong: leader phuc vu yeu cau. ISR dong bo hoa -> Buoc 2: Loi xay ra: Broker leader dang hoat dong bi sap -> Buoc 3: Bau chon: Controller phat hien loi va khoi tao bau chon. Buoc 4: Leader moi: Mot follower tu tap hop ISR duoc thang cap
+| Khía cạnh | Vai trò của partition |
+|---|---|
+| Hiệu năng | Cho phép xử lý song song |
+| Mở rộng | Dễ phân tán qua nhiều broker |
+| Tính thứ tự | Kafka chỉ đảm bảo thứ tự trong **một partition** |
+| Cân bằng tải | Hỗ trợ phân phối dữ liệu đều hơn |
 
--> Khong phai moi ban sau deu binh dang - chi ISR moi duoc Kafka tin tuong
-Khi mot broker moi dc them vao hay 1 broker cu nghi huu thi Kafka se tu dong phan cong lai cong viec, hay cac partition khong bi qua tai
+> **Lưu ý quan trọng:** Kafka **không đảm bảo thứ tự trên toàn bộ topic** nếu topic có nhiều partition. Kafka chỉ đảm bảo thứ tự trong từng partition. fileciteturn3file0L7-L20
 
-Van hanh toi uu
-- Luon co toi thieu 3 broker -> du toi thieu quorum -> tranh duoc tinh trang Split Brain
-- phan cung toi uu
-hang muc | khuyen nghi | ly do chinh
-dia | du RAM | tan dung bo dem hdh
-mang | do tre thap | sao chep khong bi tre
+---
 
-- Chi so giam sat chinh: ISR Shrinkage: tuc la nhom ISR dang bi co lai -> cac ban sao dang gap kho khan trong dong bo, Replica Lag, Controller Re-election
+## 2.3. Producer, Consumer và Cluster
 
+### 2.3.1. Producer
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Producer là thành phần tạo ra message và gửi tới topic.
 
-Vid 8 
-- 1 Producer: toc do va an toan
-- 2 Consumer group: phoi hop
-- 3 offset: dau chan du lieu
-- 4 partition: dung thu tu
+Producer có thể:
 
-1 Producer
-can bang giua toc do va an toan
+- Gộp nhiều message thành batch để giảm tải mạng
+- Tự động phân phối message vào các partition
+- Tối ưu hiệu năng khi gửi dữ liệu với tốc độ cao
 
-cai dat acks | toc do | rui ro mat du lieu | truong hop su dung
-acks = 0 | cao nhat | cao | du lieu khong quan trong
-acks = 1 | cao | thap | ghi log thong luong cao
-acks = all | an toan nhat | rat thap | he thong quan trong
+### 2.3.2. Consumer
 
-linger.ms: cau hinh nay bao doi 1 chut de kafka gom message thanh 1 nhom -> gui hieu qua hon
-batch.size: kich thuoc cua nhom du lieu ben tren
-compression.type: nen du lieu -> giam tai bang thong mang
+Consumer là thành phần đọc message từ Kafka.
 
-- Dieu gi xay ra khi mang truc trac co van de: ket hop retries + idempotence -> dam bao du co gui lai bao nhieu lan thi cung khong bi trung lap message
+Consumer thường hoạt động theo **consumer group** để:
 
+- Chia tải việc đọc dữ liệu
+- Tránh xử lý trùng lặp giữa các consumer trong cùng nhóm
+- Tăng thông lượng xử lý
 
-2 Consumer
-- Khai niem trung tam Rebalancing: qua trinh phan chia lai cac partition cua topic co cac consumer trong nhom khi co thay doi thanh vien
-- Cai gia phai tra an sau qua trinh rebalancing ?: Toan bo group se phai tam dung xu ly -> tang vot do tre -> ap luc khi xu ly real time. Giai phap: Static group membership: bang cach gan cho moi group 1 id co dinh laf group.instance.id Neu co khoi dong lai thi Kafka khong can phai rebalancing toan dien nua (vi nho mat group do :))
+### 2.3.3. Cluster
 
-3 Offset: bookmark trong 1 quyen sach, danh dau chinh sach vi tri ma consumer da doc toi -> dam bao du lieu khong bi bo sot va xu ly 1 cach sai lam
+Kafka cluster là một nhóm các máy chủ (**broker**) làm việc cùng nhau.
 
-Chien luoc Commit Offset
-Tu dong - auto commit: don gian nhung rui ro mat hoac trung lap du lieu
-Dong bo - sync commit: an toan nhung chan cho den khi commit thanh cong
-Bat dong bo - async commit: nhanh nhung viec xu ly loi khi gui lai phuc tap
-Thu cong - manual commit: kiem soat hoan toan cho logic xu ly phuc tap
+Mỗi broker giữ một phần dữ liệu. Toàn cluster phối hợp để mang lại:
 
-Viec chon chien luoc commit -> quyet dinh su dam bao xu ly du lieu
-At least one: dam bao khong mat du lieu nhung du lieu co the bi trung lap
-Exacly one: khong mat khong trung , can su dung cac producer transaction -> tinh nang nang cao cho phep gui khoi cong viec du lieu dam bao tinh nguyen tu 
+- Khả năng dự phòng
+- Khả năng chịu lỗi
+- Khả năng mở rộng ngang
 
-4 Patition: dam bao dung thu tu
-- Thu tu message dam bao trong 1 partition duy nhat, Kafka khong dam bao thu tu cua no tren toan topic neu no co nhieu partition
-Duy tri thu tu: su dung key nhat quan cho toan message lien quan. Kafka dam bao cac message co cung Key se di cung vao cung partition. Hay han che thay doi so luong partition ma thu tu la yeu to song con
+### 2.3.4. Replication trong cluster
 
--> Cac cau hinh cua Partition se dam bao toc do va su an toan cua dong du lieu khi duoc gui di
--> Cac cau hinh cua Consumer se dam bao do tin cay va nhat quan khi du lieu do duoc doc
+Các partition không chỉ được phân tán mà còn được **replicate** sang các broker khác để tránh mất dữ liệu khi một broker gặp sự cố.
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Thành phần | Vai trò |
+|---|---|
+| Broker | Máy chủ Kafka lưu và phục vụ dữ liệu |
+| Leader replica | Bản sao chính nhận ghi và phục vụ đọc |
+| Follower replica | Bản sao phụ đồng bộ dữ liệu từ leader |
+| ISR | Tập replica đang theo kịp leader và đủ điều kiện được bầu làm leader mới |
 
-Vid 7:
+> **Lưu ý:** Một cluster mạnh không chỉ cần nhiều broker, mà còn cần chiến lược replication, ISR và failover hợp lý. fileciteturn3file0L21-L34
 
-1 Cau truc Log: nen tang cua Kafka: chuoi ban ghi thu tu, bat bien, duoc toi uu hoa cho viec ghi va doc tuan tu (chi cho phep ghi vao cuoi)
+---
 
-To chuc log:
-Topic -> Partitions -> Segments: du lieu duoc to chuc theo cac cap bac tu lon den nho de de dang quan ly 
+# 3. Vì sao Kafka rất nhanh?
 
-2. 
-Ben trong 1 segment
-- .log
-- .index: hoat dong nhu 1 muc luc cua cuon sach giup Kafka nhay thang den 1 message ma khong can quet toan bo
-- .timeindex: cho phep tim kiem dua tren thoi gian
--> thu ma ket noi tat ca thu nay lai voi nhau la offset: moi message trong 1 partition co 1 ma dinh danh khac nhau
+## 3.1. Hai trụ cột hiệu năng
 
-Append-Only Log: ghi tuan tu -> tan dung duoc toc do cao nhat cua o cung, giam phan manh dia, va cho phep hdh luu tru du lieu vao page cache -> tang toc do doc du lieu 
+Kafka có thể xử lý khối lượng rất lớn nhờ hai cơ chế nền tảng:
 
-Khi mot tep segment trong kafka day thi sao -> Kafka chi don gian la dong no lai va mo ra 1 tep segment moi de ghi tiep, su bat bien -> chia khoa cho su on dinh he thong
--> Khong co lenh UPDATE trong Kafka - chi co WRITE va DELETE mot cach thong minh
+1. **Sequential I/O** (ghi tuần tự)
+2. **Zero Copy** (không sao chép trung gian không cần thiết)
 
-3 Vong doi du lieu: Retention policies
-- Giu lai theo thoi gian: giu du lieu trong mot khoang thoi gian cu the (vi du: 7 ngay): Ly tuong cho logs va phan tich
-- Giu lai theo kich thuoc: gioi han tong kich thuoc log cho 1 partition (khi partition vuot qua 1 muc gioi han dung luong nao do. Kafka se tu dong xoa cac ban ghi cu nhat di). Tot nhat khi dung luong luu tru co han
-- Nen log (Compaction): Co che nay se don dep ngay ben trong segment, dam bao giu lai gia tri cuoi cung cho moi key, hoan hao cho viec luu tru trang thai
+---
 
-4 Toi uu hoa chi phi 
+## 3.2. Sequential I/O
 
-cau hinh | Uu diem | Nhuoc diem
-giu lai lau | de xu ly lai | chi phi cao
-giu lai ngan | chi phi thap | rui ro mat du lieu
-segment lon | thong luong cao | xoa kem linh hoat
-segment nho | don dep nhanh | chi phi quan ly
+### 3.2.1. Ghi ngẫu nhiên vs ghi tuần tự
 
-Con so khoi dau cho cac segment: dat kich thuoc cac segment la 1 GB -> con so vang can bang giua ghi va quan ly du lieu
+Nếu ghi ngẫu nhiên, đầu đọc của ổ đĩa phải liên tục di chuyển để tìm vị trí ghi mới, giống như một thủ thư phải chạy khắp thư viện để cất sách.
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Ngược lại, với **ghi tuần tự**, dữ liệu được ghi nối tiếp vào cuối file:
 
-Vid 9 Kafka streams
-- Neu database la noi du lieu ngu yen thi Kafka Streams la noi du lieu song va hanh dong
-1 Ghi du lieu
-2 Kafka Streams
-3 ksqlDB
-4 Ung Dung
+- Giảm seek time
+- Tận dụng tốt phần cứng lưu trữ
+- Tăng thông lượng ghi
 
-1 Ghi du lieu: tu du lieu sang dong chay
-- Kafka Streams API, ksqlDB
-Kafka Streams: Stream: la dong su kien lien tuc va Table: la trang thai hien tai duoc rut ra tu chinh stream do
--> co the filtering: lap do du lieu khong can thiet, mapping: bien doi cau truc cua no, join: ket hop nhieu dong data khasc nhau, windowing: phan tich du lieu theo tung cua so thoi gian
--> Thay vi cho du lieu, ban xu ly no ngay khi no xuat hien
+### 3.2.2. Lợi ích
 
-3. ksqlDB
--> phan tich du lieu real time tro nen don gian nhu chay 1 truy van sql
+| Cách ghi | Đặc điểm | Tác động |
+|---|---|---|
+| Ghi ngẫu nhiên | Đầu đọc di chuyển nhiều | Chậm hơn |
+| Ghi tuần tự | Ghi nối tiếp cuối file | Nhanh hơn nhiều |
 
-4. Ung dung
-- Data enrichment
-- Real-time Analytics
+---
+
+## 3.3. Zero Copy
+
+### 3.3.1. Vấn đề của sao chép trung gian
+
+Khi dữ liệu phải sao chép qua nhiều vùng nhớ, CPU sẽ phải làm nhiều việc hơn và độ trễ cộng dồn sẽ tăng lên.
+
+Mô hình truyền dữ liệu truyền thống thường có nhiều bước sao chép:
+
+1. Từ đĩa vào bộ đệm của hệ điều hành
+2. Từ bộ đệm hệ điều hành sang bộ đệm ứng dụng
+3. Từ bộ đệm ứng dụng sang socket buffer
+4. Từ socket buffer sang card mạng
+
+### 3.3.2. Với Zero Copy
+
+Hệ điều hành có thể gửi dữ liệu gần như trực tiếp từ bộ đệm đĩa đến card mạng thông qua các lệnh như `sendfile()`.
+
+### 3.3.3. So sánh
+
+| Tiêu chí | Không có Zero Copy | Có Zero Copy |
+|---|---|---|
+| Số lần sao chép | Nhiều lần (OS và Application) | Ít hơn, trực tiếp hơn |
+| Tải CPU | Cao | Thấp hơn |
+| Độ trễ | Lớn hơn | Nhỏ hơn |
+| Hiệu năng tổng thể | Kém hơn | Tốt hơn |
+
+> **Kết luận:** Ghi tuần tự giúp giảm chi phí I/O, còn Zero Copy giúp giảm tải CPU. Kết hợp hai yếu tố này tạo nên hiệu năng rất cao của Kafka. fileciteturn3file0L35-L52
+
+---
+
+# 4. Các bài toán Kafka thường giải quyết
+
+## 4.1. Xử lý và phân tích log
+
+Kafka thường được dùng làm lớp trung tâm để thu thập log từ nhiều microservice rồi đẩy sang các hệ thống phân tích.
+
+Ứng dụng tiêu biểu:
+
+- Observability
+- Log streaming
+- Centralized logging
+
+## 4.2. Luồng dữ liệu gợi ý và học máy
+
+Mỗi hành vi người dùng có thể được ghi thành một sự kiện, đẩy vào Kafka và xử lý bởi các hệ thống như Flink để phục vụ:
+
+- Recommendation
+- Machine learning features
+- Real-time personalization
+
+## 4.3. Giám sát và cảnh báo hệ thống
+
+Các dịch vụ trong hệ thống liên tục gửi metric hoặc event vào Kafka, sau đó được phân tích để phát hiện bất thường và cảnh báo sớm.
+
+## 4.4. CDC (Change Data Capture)
+
+Kafka thường đóng vai trò trung gian phân phối các thay đổi dữ liệu từ database đến nhiều hệ thống đích theo thời gian thực.
+
+## 4.5. Di chuyển và nâng cấp hệ thống
+
+Hệ thống cũ có thể đẩy dữ liệu vào Kafka, còn hệ thống mới dần đọc dữ liệu từ Kafka để chuyển đổi từng bước mà không cần cắt chuyển đột ngột.
+
+> **Lưu ý:** Kafka đặc biệt mạnh ở những nơi cần tách rời producer và consumer theo thời gian, không gian và tốc độ xử lý. fileciteturn3file0L53-L66
+
+---
+
+# 5. Kafka có thật sự không bao giờ mất message không?
+
+## 5.1. Câu trả lời ngắn gọn
+
+**Không có hệ thống nào “mặc định” không bao giờ mất dữ liệu.** Kafka rất mạnh, nhưng độ an toàn thực sự phụ thuộc vào cấu hình producer, broker, replication và consumer offset.
+
+---
+
+## 5.2. Rủi ro ở phía Producer
+
+### 5.2.1. Hành trình của message ở producer
+
+1. Application thread tạo message
+2. Record accumulator giữ message trong hàng đợi
+3. Sender thread gửi message ra broker
+
+### 5.2.2. Rủi ro
+
+Nếu ứng dụng chết đột ngột khi message còn nằm trong `record accumulator`, message đó có thể mất.
+
+### 5.2.3. Cấu hình nên dùng
+
+| Cấu hình | Mục đích |
+|---|---|
+| `acks=all` | Chờ tất cả replica cần thiết xác nhận |
+| `retries > 0` | Tự động gửi lại khi lỗi tạm thời |
+| `enable.idempotence=true` | Ngăn chặn message trùng lặp khi retry |
+
+---
+
+## 5.3. Rủi ro ở phía Broker
+
+### 5.3.1. RAM nhanh nhưng có rủi ro
+
+Kafka có thể ghi vào RAM/page cache trước rồi mới flush xuống đĩa sau. Điều này giúp nhanh, nhưng nếu sự cố xảy ra đúng lúc, dữ liệu chưa kịp bền vững có thể biến mất.
+
+### 5.3.2. Rủi ro replication
+
+Nếu leader chết trước khi follower kịp đồng bộ, message có thể bị mất nếu replica chưa đủ an toàn.
+
+### 5.3.3. Cách giảm rủi ro
+
+- Dùng **ít nhất 3 replica** cho partition quan trọng
+- Cấu hình `min.insync.replicas`
+- Theo dõi replica lag
+- Kết hợp `acks=all`
+
+---
+
+## 5.4. Rủi ro ở phía Consumer
+
+Consumer dùng **offset** như một dấu trang để biết mình đã đọc tới đâu.
+
+### 5.4.1. Auto commit
+
+Kafka tự động commit offset.
+
+**Rủi ro:** offset đã tăng nhưng logic xử lý thật sự chưa xong, nếu ứng dụng chết thì message bị bỏ lỡ.
+
+### 5.4.2. Manual commit
+
+Chỉ commit offset khi xử lý thật sự hoàn tất.
+
+### 5.4.3. Chiến lược thông minh
+
+- Dùng async commit cho đường đi bình thường để tăng tốc
+- Dùng sync commit trong tình huống lỗi quan trọng
+- Dùng dead-letter queue cho message lỗi kéo dài
+
+> **Lưu ý rất quan trọng:** Message có thể vẫn còn trong Kafka, nhưng **cơ hội xử lý message đó** có thể biến mất nếu quản lý offset sai. Đó cũng là một dạng mất dữ liệu ở cấp độ nghiệp vụ. fileciteturn3file0L67-L92
+
+---
+
+# 6. Khi một broker ngừng hoạt động thì chuyện gì xảy ra?
+
+## 6.1. Tính sẵn sàng cao của Kafka
+
+Kafka được xây dựng với triết lý:
+
+- Chịu lỗi
+- Tiếp tục hoạt động
+- Tự phục hồi ở mức nhất định
+
+HA không phải là tính năng gắn thêm, mà là một phần cốt lõi trong thiết kế.
+
+---
+
+## 6.2. Controller, Partition và ISR
+
+### 6.2.1. Controller
+
+Controller là thành phần điều phối các quyết định quản trị của cluster, ví dụ:
+
+- Theo dõi broker sống/chết
+- Kích hoạt bầu leader mới
+- Điều phối phân vùng và metadata
+
+### 6.2.2. ISR
+
+**ISR (In-Sync Replicas)** là tập các replica đang đồng bộ tốt với leader và đủ điều kiện được bầu lên làm leader mới.
+
+---
+
+## 6.3. Failover diễn ra như thế nào?
+
+1. Leader đang phục vụ bình thường
+2. Broker chứa leader gặp sự cố
+3. Controller phát hiện lỗi
+4. Một follower trong ISR được bầu làm leader mới
+5. Client tiếp tục làm việc với leader mới
+
+### 6.3.1. Điều quan trọng
+
+Không phải mọi follower đều đủ điều kiện như nhau.
+
+Chỉ replica trong **ISR** mới được Kafka tin tưởng để lên làm leader.
+
+---
+
+## 6.4. KRaft và ZooKeeper
+
+### 6.4.1. Kiến trúc cũ
+
+Kafka trước đây dùng **ZooKeeper** bên ngoài để điều phối cluster.
+
+### 6.4.2. Kiến trúc mới
+
+Kafka hiện đại đang chuyển sang **KRaft**, tức là cơ chế metadata quorum tích hợp trực tiếp trong Kafka controller.
+
+### 6.4.3. Lợi ích của KRaft
+
+| Kiến trúc | Đặc điểm |
+|---|---|
+| ZooKeeper | Tách hệ điều phối ra ngoài, phức tạp hơn |
+| KRaft | Tích hợp vào Kafka, đơn giản hơn và thường giảm độ trễ |
+
+---
+
+## 6.5. Khuyến nghị vận hành
+
+### 6.5.1. Hạ tầng tối thiểu
+
+| Hạng mục | Khuyến nghị | Lý do |
+|---|---|---|
+| Broker | Tối thiểu 3 | Đảm bảo quorum và HA |
+| RAM | Đủ lớn | Tận dụng page cache |
+| Mạng | Độ trễ thấp | Replication ổn định |
+| Disk | Nhanh, ổn định | Bảo đảm throughput |
+
+### 6.5.2. Chỉ số cần theo dõi
+
+- ISR shrinkage
+- Replica lag
+- Controller re-election
+
+> **Lưu ý:** Nếu ISR co lại thường xuyên, đó là dấu hiệu cluster đang gặp vấn đề về đồng bộ, I/O hoặc mạng. fileciteturn3file0L93-L120
+
+---
+
+# 7. Producer, Consumer, Offset và Partition
+
+## 7.1. Producer: cân bằng giữa tốc độ và an toàn
+
+### 7.1.1. So sánh cấu hình `acks`
+
+| Cài đặt `acks` | Tốc độ | Rủi ro mất dữ liệu | Trường hợp sử dụng |
+|---|---|---|---|
+| `0` | Cao nhất | Cao | Dữ liệu không quan trọng |
+| `1` | Cao | Thấp đến vừa | Logging thông lượng cao |
+| `all` | Thấp hơn | Thấp nhất | Hệ thống quan trọng |
+
+### 7.1.2. Cấu hình tăng hiệu quả
+
+| Cấu hình | Vai trò |
+|---|---|
+| `linger.ms` | Chờ một chút để gom batch |
+| `batch.size` | Kích thước batch |
+| `compression.type` | Nén dữ liệu để giảm băng thông |
+
+### 7.1.3. Retry và idempotence
+
+Khi mạng không ổn định, kết hợp:
+
+- `retries`
+- `enable.idempotence=true`
+
+sẽ giúp producer gửi lại mà không tạo message trùng lặp.
+
+---
+
+## 7.2. Consumer group và rebalancing
+
+### 7.2.1. Rebalancing là gì?
+
+Rebalancing là quá trình Kafka phân chia lại các partition của topic cho các consumer trong cùng group khi có thay đổi thành viên.
+
+### 7.2.2. Cái giá của rebalancing
+
+Trong quá trình rebalance:
+
+- Toàn bộ group có thể tạm dừng xử lý
+- Độ trễ tăng
+- Hệ thống real-time có thể chịu ảnh hưởng
+
+### 7.2.3. Giảm tác động với static membership
+
+Gán `group.instance.id` cố định cho consumer để khi restart, Kafka không cần rebalance toàn diện.
+
+---
+
+## 7.3. Offset: dấu trang của dữ liệu
+
+Offset giống như dấu trang trong một cuốn sách, đánh dấu vị trí consumer đã đọc tới.
+
+### 7.3.1. Các chiến lược commit offset
+
+| Chiến lược | Đặc điểm | Ưu điểm | Nhược điểm |
+|---|---|---|---|
+| Auto commit | Tự động | Đơn giản | Có thể mất hoặc trùng dữ liệu |
+| Sync commit | Đồng bộ | An toàn hơn | Chậm hơn |
+| Async commit | Bất đồng bộ | Nhanh | Xử lý lỗi khó hơn |
+| Manual commit | Thủ công | Kiểm soát tối đa | Phức tạp hơn |
+
+### 7.3.2. Các mức bảo đảm
+
+| Mức bảo đảm | Ý nghĩa |
+|---|---|
+| At-most-once | Có thể mất dữ liệu, không trùng |
+| At-least-once | Không mất dữ liệu, có thể trùng |
+| Exactly-once | Không mất, không trùng, chi phí cao hơn |
+
+---
+
+## 7.4. Partition và thứ tự dữ liệu
+
+Kafka chỉ đảm bảo thứ tự trong một partition.
+
+### 7.4.1. Cách duy trì thứ tự
+
+- Dùng key nhất quán cho các message liên quan
+- Kafka sẽ đưa cùng key vào cùng partition
+- Hạn chế thay đổi số lượng partition nếu thứ tự là yếu tố sống còn
+
+> **Lưu ý:** Cấu hình partition ảnh hưởng trực tiếp đến thông lượng, độ an toàn và khả năng duy trì thứ tự của dòng dữ liệu. fileciteturn3file0L121-L153
+
+---
+
+# 8. Cấu trúc log nội bộ của Kafka
+
+## 8.1. Append-Only Log
+
+Nền tảng của Kafka là **chuỗi bản ghi tuần tự, bất biến**, tối ưu cho ghi và đọc tuần tự.
+
+Kafka chỉ cho phép ghi vào cuối log:
+
+- Không cập nhật giữa chừng như cơ sở dữ liệu quan hệ truyền thống
+- Tối ưu cho throughput và độ bền
+
+---
+
+## 8.2. Tổ chức dữ liệu
+
+Cấu trúc logic:
+
+- **Topic**
+  - **Partition**
+    - **Segment**
+
+### 8.2.1. Các file trong một segment
+
+| File | Chức năng |
+|---|---|
+| `.log` | Chứa dữ liệu message |
+| `.index` | Chỉ mục theo offset |
+| `.timeindex` | Chỉ mục theo thời gian |
+
+Offset đóng vai trò “sợi chỉ” kết nối tất cả các phần này lại với nhau.
+
+---
+
+## 8.3. Khi segment đầy thì sao?
+
+Khi một segment đạt ngưỡng:
+
+- Kafka đóng segment hiện tại
+- Mở một segment mới để ghi tiếp
+
+Sự bất biến này là nền tảng cho tính ổn định của hệ thống.
+
+> **Lưu ý:** Trong Kafka không có lệnh `UPDATE` theo nghĩa truyền thống. Thực tế là **WRITE** và **DELETE** theo cơ chế retention/compaction.  
+
+---
+
+## 8.4. Retention policies
+
+### 8.4.1. Giữ theo thời gian
+
+Giữ dữ liệu trong một khoảng thời gian xác định, ví dụ 7 ngày.
+
+### 8.4.2. Giữ theo dung lượng
+
+Giới hạn tổng dung lượng log của một partition, khi vượt ngưỡng Kafka sẽ xóa dữ liệu cũ nhất.
+
+### 8.4.3. Log compaction
+
+Giữ lại giá trị cuối cùng cho mỗi key, rất phù hợp cho:
+
+- Dữ liệu trạng thái
+- Cache rebuild
+- Event-sourced state
+
+---
+
+## 8.5. Tối ưu chi phí lưu trữ
+
+| Cấu hình | Ưu điểm | Nhược điểm |
+|---|---|---|
+| Giữ lâu | Dễ replay, dễ phân tích | Tốn chi phí |
+| Giữ ngắn | Tiết kiệm dung lượng | Rủi ro thiếu dữ liệu để xử lý lại |
+| Segment lớn | Thông lượng tốt | Dọn dẹp kém linh hoạt |
+| Segment nhỏ | Xóa nhanh, linh hoạt | Tăng chi phí quản lý |
+
+> **Khuyến nghị khởi đầu:** Segment size khoảng **1 GB** thường là điểm cân bằng tốt giữa hiệu năng và quản trị. fileciteturn3file0L154-L177
+
+---
+
+# 9. Kafka Streams và xử lý dữ liệu thời gian thực
+
+## 9.1. Tư duy cốt lõi
+
+Nếu database là nơi dữ liệu “nằm yên”, thì **Kafka Streams** là nơi dữ liệu “sống” và được xử lý ngay khi xuất hiện.
+
+---
+
+## 9.2. Kafka Streams API
+
+Kafka Streams cho phép:
+
+- Filtering
+- Mapping
+- Joining
 - Aggregation
+- Windowing
 
-Kafka streams -noi du lieu khong chi duoc luu -> ma thuc su song
+### 9.2.1. Stream và Table
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Khái niệm | Ý nghĩa |
+|---|---|
+| Stream | Dòng sự kiện liên tục |
+| Table | Trạng thái hiện tại rút ra từ stream |
 
-Vid 10:
-Semantic Exactly - Once & Transactional messaging
+---
 
-Kafka noi tieng vi toc do. Nhung neu moi message phai xuat hien mot lan duy nhat, he thong co con nhanh?
+## 9.3. ksqlDB
 
-1 Van de toan ven data
-2 Giai phap: giao dich kafka
-3 Cau hinh Exactly-Once
-4 Danh doi: Toc do va tin cay
+`ksqlDB` giúp truy vấn và xử lý dữ liệu real-time bằng cú pháp gần giống SQL, giúp nhiều bài toán streaming trở nên dễ tiếp cận hơn.
 
-1 Van de toan ven du lieu
-Dam bao | Uu diem | Nhuoc diem
-At-most-once | Nhanh, khong trung lap | Co the mat data
-At-least-once | Khong mat du lieu | co the trung lap
-Exactly-once | Khong mat, khong trung | Do tre / chi phi cao hon
+---
 
-Truoc day thi kafka chi ho tro at-least-once thoi nhung tu phien ban 0.11 -> dat duoc eos
+## 9.4. Ứng dụng tiêu biểu
 
+- Data enrichment
+- Real-time analytics
+- Aggregation theo thời gian
 
-2. Giai phap: giao dich Kafka
-Kafka hoat dong nhu DB
+> **Lưu ý:** Kafka không chỉ để lưu dữ liệu. Với Kafka Streams và ksqlDB, dữ liệu có thể được biến đổi và khai thác ngay trong lúc đang chảy. fileciteturn3file0L178-L189
 
-Giao dich tin nhan: cho phep producer gui 1 nhom message nhu mot don vi nguyen tu. Tat ca thanh cong, hoac khong gi ca
+---
 
-Vong doi transaction:
-beginTxn(): Bat dau giao dich
-send(message): Gui tin nhan
-commitTxn(): Xac nhan thanh cong
-abortTxn(): Huy bo neu loi
+# 10. Exactly-Once và Transactional Messaging
 
-3. Cau hinh Exactly-Once
+## 10.1. Bài toán toàn vẹn dữ liệu
 
-producer: 
-- enable idempotence: phải được bật thành true -> kich hoat che do producer khong gui tin nhan trung lap khi ma no gui lap (Cap cho tung producer 1 cai ID duy nhat va danh so thu tu cho tung message)
-- transaction id: hoat dong nhu 1 cccd cua transaction
+| Mức bảo đảm | Ưu điểm | Nhược điểm |
+|---|---|---|
+| At-most-once | Nhanh, không trùng | Có thể mất dữ liệu |
+| At-least-once | Không mất dữ liệu | Có thể trùng |
+| Exactly-once | Không mất, không trùng | Độ trễ và chi phí cao hơn |
 
-consumer:
-- isolation level: read commited: dam bao consumer chi doc cac giao dich da thanh cong hay thoi
+Kafka từ phiên bản 0.11 trở đi hỗ trợ cơ chế giúp đạt **Exactly-Once Semantics (EOS)** trong một số kịch bản.
 
-4. Danh doi: toc do vs tin cay
+---
 
-- phu thuoc rat nhieu vao bai toan cu the
-- Nen dung eos khi do tin cay duoc dat len hang dau: tai chinh, ngan hang
-- Khong nen dung eos khi hieu nang duoc dat len hang dau, khi du lieu trung lap cung khong sau: analytics, logging
+## 10.2. Giao dịch Kafka
 
-Cai gia cua su chinh xac
-- Do tre tang len: dieu phoi cac transaction
-- Cac broker chiu tai xu ly tang
-- He thong phai quan ly them cac metadata cua cac transaction
+Kafka có thể hoạt động theo kiểu gần giống transaction của database.
 
--> Do chinh xac tuyet doi khong mien phi - do la su danh doi giua toc do va do tin cay
+### 10.2.1. Vòng đời transaction
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+1. `beginTransaction()`
+2. `send(message)`
+3. `commitTransaction()`
+4. `abortTransaction()` nếu lỗi
 
-Vid 11: CDC & Event Sourcing
+---
 
-1 Du lieu la mot cau chuyen
-2 Ghi lai voi CDC
-3 Ke chuyen Event Sourcing
-4 So sanh 2 cach tiep can
-5 Chon huong di
+## 10.3. Cấu hình Exactly-Once
 
-1. Du lieu la mot cau chuyen
-2 triet ly khac nhau
+### 10.3.1. Ở producer
 
-CDC: nhu nguoi quan sat ghi nhan su thay doi sau khi no da dien ra va xac nhan trong database
-Event Sourcing: nguoi ke chuyen, ghi lai y dinh, hanh dong ngay tai thoi diem no phat sinh
+| Cấu hình | Vai trò |
+|---|---|
+| `enable.idempotence=true` | Chống gửi trùng khi retry |
+| `transactional.id` | Định danh giao dịch |
 
-2 Ghi lai voi CDC
-Change Data Capture: Ky thuat theo doi thay doi (INSERT, UPDATE, DELETE) trong DB va bien chung thanh luong su kien
-Trien khai voi debezium: khong phai la kieu di hoi database lien tuc co gi moi khong. Doc truc tiep tu transaction log cua database hieu qua ma khong lam phien den he thong nguon -> bien doi thanh cac su kien va day thang vao kafka
+### 10.3.2. Ở consumer
 
-Database: thay doi duoc ghi vao trasaction log -> Debezium: Doc transaction log -> Kafka Topic: Debezium publish su kien thay doi -> Consumers: cac ung dung khac tiep thu su kien
+| Cấu hình | Vai trò |
+|---|---|
+| `isolation.level=read_committed` | Chỉ đọc dữ liệu từ transaction đã commit |
 
-Uu diem: lich su, khong xam lan, co the gan vao 1 ung dung legacy ma khong can thay doi du chi 1 dong code
-Han che: chi ghi lai ket qua cuoi cung sau khi da commit -> khong biet duoc logic nghiep vu hay y dinh dang sau su thay doi do la gi
+---
 
-3 Ke chuyen Event Sourcing: 
-Trang thai cua ung dung duoc xac dinh bang 1 chuoi cac su kien theo trinh tu thoi gian
-Kafka as an Event Store: moi hd tro thanh 1 su kien va duoc ghi vao topic cua Kafka. Ma topic cua Kafka thi bat bien -> xay ra 1 tinh nang ao dieu la replay lai su kien.
-Cai gia phai tra la su phuc tap trong cach tu duy xay dung ung dung
+## 10.4. Cái giá phải trả
 
--> Event Sourcing ke lai cau chuyen vi sao du lieu thay doi, khong chi la cai gi da thay doi
+Exactly-once không miễn phí:
 
-4 So sanh 2 cach tiep can
+- Tăng độ trễ
+- Tăng tải xử lý ở broker
+- Phát sinh thêm metadata giao dịch
+- Tăng độ phức tạp vận hành
 
-Tieu chi | CDC | Event Sourcing
-Diem bat dau | Sau khi DB ghi xong | Ngay khi hanh dong xay ra
-Du lieu luu | Thay doi (delta) | Toan bo su kien (log)
-Cong cu | Debezium + Kafka | Kafka (Event Store)
-Thach thuc | Phu thuoc vao DB | Phuc tap trong thiet ke
+> **Khuyến nghị:**  
+> - Nên dùng EOS khi độ chính xác là ưu tiên số một, ví dụ tài chính, ngân hàng.  
+> - Không nhất thiết dùng EOS cho logging hoặc analytics nếu dữ liệu trùng lặp vẫn chấp nhận được. fileciteturn3file0L190-L215
 
--> CDC giup he thong biet khi nao du lieu thay doi; Event Sourcing giup he thong hieu tai sao
+---
 
-5 Chon huong di
-Legacy System -> CDC -> modern Architecture
+# 11. CDC và Event Sourcing
 
-Bat dau tren trang giay trang dac biet voi cac he thong quan trong -> Event Store
+## 11.1. Hai triết lý khác nhau
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+### 11.1.1. CDC
 
-Vid 12: Bao mat toan dien Kafka
+CDC giống như một người quan sát, ghi nhận sự thay đổi **sau khi** dữ liệu đã được ghi vào database.
 
-1 3 tru cot bao mat
-Xac thuc: ban la ai
-Phan quyen: ban co the lam gi
-Ma hoa: giu bi mat du lieu
+### 11.1.2. Event Sourcing
 
-2 Xac thuc & Phan quyen
-2 co che: SSL: X509, client va broker chung minh danh tinh cho nhau, SASL 
-SASL
-co che | mo ta
-username, password | phai dung voi ssl
-SCRAM | xac thuc hoi-dap an toan hon
-GSSAPI | Cap doan nghiep (Kerberos)
+Event Sourcing ghi lại **ý định và hành động** ngay tại thời điểm nó phát sinh.
 
-3 ACLs: dinh nghia cac quyen cu the (doc, ghi) cho nguoi dung sau khi da xac thuc thanh cong
+---
 
--> khong ai nen co quyen quan tri neu ho khong thuc su can den
+## 11.2. CDC với Debezium
 
-3 Ma hoa toan dien: bao ve chinh du lieu
-Ma hoa in-transit (SSL/TLS): bao ve du lieu tren truyen
-Ma hoa at-rest: bao ve du lieu duoc luu tren dia
+Debezium đọc trực tiếp transaction log của database rồi đẩy thay đổi vào Kafka.
 
--> Du lieu phai duoc khoa khong chi o cong ma o moi noi, moi luc
+### 11.2.1. Luồng dữ liệu
 
-4. Thuc hanh
-Kiem tra thiet yeu
-1. Bat xac thuc SSL/TLS ma hoa data dang truyen -> 2. xac thuc SCRAM, Kerberos -> 3. Thuc hien xac thuc quyen ACLs nghiem ngat, ma hoa du lieu luu tren dia -> 4. Xoay vong cac chung chi bao mat dinh ky
--> Bao mat khong phai la 1 cau hinh, do la 1 van hoa an toan
+1. Database ghi thay đổi vào transaction log
+2. Debezium đọc transaction log
+3. Debezium publish sự kiện thay đổi vào Kafka topic
+4. Consumer khác tiếp nhận và xử lý
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+### 11.2.2. Ưu điểm và hạn chế
 
-VID 13: Scaling & Performance Tuning
+| Tiêu chí | CDC |
+|---|---|
+| Ưu điểm | Không xâm lấn, hợp với hệ thống legacy |
+| Hạn chế | Chỉ thấy kết quả sau commit, không phản ánh đầy đủ ý định nghiệp vụ |
 
-Phan vung thong minh -> tinh chinh producer & consumer -> toi uu hoa cluster & ha tang
+---
 
-1. Chia khoa xu ly song song: Partition: don vi song song co ban trong 1 topic Kafka, Nhieu partition hon cho phep xu ly dong thoi nhieu hon
+## 11.3. Event Sourcing
 
-Thuc hanh:
-    - Bat dau voi co so: 1 partition cho moi 1MB/giay thong luong
-    - Mo rong dan khi consumer bi tre hoac broker qua tai
-    - Su dung khoa phan vung (vi du: user_id) de duy tri thu tu.
-    - Trien khai paritioner tuy chinh de phan hpoi du lieu deu
+Trong Event Sourcing, trạng thái ứng dụng được xác định bằng một chuỗi các sự kiện theo thời gian.
 
--> Mot partition la mot don vi toc do nhung cung la mot don vi hon loan neu khong duoc kiem soat
+### 11.3.1. Kafka như Event Store
 
-2. Toi uu hoa Producer: Gui du lieu nhanh hon
+Kafka phù hợp để làm event store vì:
 
-Cau hinh | Muc dich | Gia tri de xuat
-batch.size | kich thuoc lo du lieu | 32KB-64KB
-linger.ms | Thoi gian cho de lap day lo | 5-20ms
-compression.type | Giam kich thuoc du lieu | 1z4 hoac zstd
-acks | Do tin cay ghi du lieu | 1 (toc do), all (an toan)
-max.in.flight.requests.per.connection | Yeu cau song song | 5-10
+- Topic là log bất biến
+- Có thể replay
+- Có thể tái dựng trạng thái từ lịch sử sự kiện
 
-meo cho producer
-- Bat idempotence de tranh trung lap du lieu khi gui lai
-- Su dung gui bat dong bo (send()) de toi da hoa hieu qua mang
-- Theo doi RecordSendRate va RequestLatencyAvg de tinh chinh
+### 11.3.2. Đánh đổi
 
+Event Sourcing rất mạnh nhưng phức tạp hơn nhiều về thiết kế ứng dụng, mô hình hóa dữ liệu và cách suy nghĩ.
 
-3. Tang toc Consumer: doc du lieu song song
-- Nguyen tac bat di bat dich khi mo rong consumer: co the co so luong consumer = so luong partition nhung ngay khi so luong consumer vuot qua so luong partition -> nhung consumer thua ra hoan toan vo dung
+---
 
-Buoc 1: Nhieu partition: tao topic voi nhieu partition de cho phep mo rong ngang -> Buoc 2: Them Consumer: Tang so luong consumer instance trong cung mot nhom -> Buoc 3: Tach xu ly: Tach xu ly phuc tap ra motj luong nen hoac bo xu ly rieng
+## 11.4. So sánh CDC và Event Sourcing
 
--> Cang nhieu consumer, thong luong cang cao - nhung chi khi co du partition de chia se
+| Tiêu chí | CDC | Event Sourcing |
+|---|---|---|
+| Điểm bắt đầu | Sau khi DB ghi xong | Ngay khi hành động xảy ra |
+| Dữ liệu lưu | Delta thay đổi | Toàn bộ sự kiện |
+| Công cụ thường dùng | Debezium + Kafka | Kafka như Event Store |
+| Thách thức | Phụ thuộc DB | Phức tạp trong thiết kế |
 
-4. Nen tang vung chac: ha dong & dinh co
-Checklists ha tang
-- Brokers: Bat dau voi 3 de co tinh san sang cao (HA).
-- Disk I/O: Su dung SSD hoac NVMe; tranh luu tru qua mang.
-- Mang: Huong toi 10-25 Gbps cho cac cum lon
-- Replication: He so 3 can bang giua do ben va hieu suat
-- Giam sat: Theo doi UnderReplicatedPartitions, RequestLatency
+> **Kết luận:** CDC giúp hệ thống biết **khi nào dữ liệu thay đổi**; Event Sourcing giúp hệ thống hiểu **vì sao dữ liệu thay đổi**. fileciteturn3file0L216-L245
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+---
 
-Vid 15: Kafka: Van hanh he thong
-1 Trien khai: May/ Tai cho
-2 Nang cao khong gian doan
-3 Phuc hoi sau tham hoa
-4 Sao luu & Di chuyen
-5 Quy tac van hanh vang
+# 12. Bảo mật toàn diện trong Kafka
 
-1 Trien khai: May/ Tai cho
-Bare-metal: toan quyen kiem soat, nhung quan tri phuc tap
-Cloud Managed: De mo rong, nhung chi phi co the cao hon
+## 12.1. Ba trụ cột bảo mật
 
-Muc tieu: 
--> neu san pham can dua ra thi truong nhanh -> managed service
+| Trụ cột | Câu hỏi trả lời |
+|---|---|
+| Xác thực | Bạn là ai? |
+| Phân quyền | Bạn được làm gì? |
+| Mã hóa | Dữ liệu có được bảo vệ không? |
 
-2. Nang cap khong gian doan: Duy tri he thong song
-Quy trinh Rolling Upgrade
-Buoc 1: Stop mot broker -> Buoc 2: Upgrade binary / config -> Buoc 3: Restart broker & verify -> Buoc 4 Lap lai cho cac broker khac
+---
 
-Luu y quan trong:
--> Replication factor > 3: moi mau du lieu phai co 3 ban sao du lieu o cac broker khac nhau
--> Rolling upgrade la bai kiem tra su kien nhan - nang cap tung buoc nho de giu he thong song
+## 12.2. Xác thực và phân quyền
 
-3. Phuc hoi sau tham hoa: khi su co la chac chan
-- Geo-replication: Sao chep du lieu Kafka giua cac cluster o cac vi tri dia ly khac nhau de phuc hoi tham hoa -> xay dung he thong da vung giup giam do tre cho nguoi dung toan cau, cong cu di chuyen du lieu 1 cach lien mach len dam may
+### 12.2.1. Các cơ chế xác thực phổ biến
 
- | Mirror Maker 2.0 | Confluent Replicator
-Loai | Apache Kafka | enterprise
-Use Case | Replicate topics | Enterprise DR, Sync ACL
-Setup | Thu cong | Don gian hoa
+| Cơ chế | Mô tả |
+|---|---|
+| SSL/TLS với X.509 | Client và broker xác thực lẫn nhau |
+| SASL/PLAIN | Đơn giản, thường nên kết hợp với TLS |
+| SASL/SCRAM | An toàn hơn PLAIN |
+| SASL/GSSAPI | Thường dùng với Kerberos trong môi trường doanh nghiệp |
 
-4. Sao luu di chuyen du lieu
-Chien luoc Backup: Sao luu du lieu log (disk, S3), snapshot metadata
-Restore, Migration
+### 12.2.2. ACLs
 
-7 quy tac van hanh
-1 theo doi: cac chi so quan trong -> 2 tuong thich: kiem tra compatibility truoc upgrade -> 3 du phong co it nhat 1 cluster dr -> 4 tu dong hoa deployment -> 5 dien tap: test failover dinh ky
+ACL định nghĩa quyền cụ thể cho user hoặc principal sau khi xác thực thành công, ví dụ:
 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+- Read
+- Write
+- Create
+- Delete
+- Alter
+- Describe
 
-Vid 16: Kafka trong microservices
+> **Lưu ý:** Không ai nên có quyền quản trị nếu họ không thực sự cần. Nguyên tắc **least privilege** rất quan trọng trong Kafka.  
 
-2 cach chinh
-dong bo: kieu goi api thong qua http. service A goi service B va phai ngoi cho cau tra loi -> don gian nhung tao ra su phu thuoc chat che de gay tac nghen
-bat dong bo dung kafka: service A phat 1 event toi Kafka, cac service khac lang nghe va co the xu ly bat ky luc nao ma chung san sang -> he thong linh hoat va de mo rong hon rat nhieu
-1 giao tiep huong su kien
-2 saga pattern
-3 schema: hop dong du lieu
-4 thiet ke tin nhan sao cho an toan
+---
 
-1 giao tiep huong su kien
-Kien truc huong su kien: Mo hinh noi cac dich vu giao tiep bang cach san xuat va tieu thu su kien, ma khong can biet ve nhau
+## 12.3. Mã hóa toàn diện
 
-2 saga pattern
-Lam sao dam bao giao dich an toan trong he thong phan tan
+### 12.3.1. In-transit encryption
 
-Mo hinh | Cach hoat dong | Uu diem | Nhuoc diem
-Choreography | Dich vu xuat ban su kien kich hoat dich vu tiep theo | Don gian, khong co dieu phoi vien | Kho theo doi luong phuc tap
-Orchestration | Mot dieu phoi vien trung tam gui lenh | De quan ly, logic ro rang | Phu thuoc vao dieu phoi vien
+Dùng SSL/TLS để bảo vệ dữ liệu trên đường truyền.
 
--> kafka la 1 nen tang hoan hao cho 2 mo hinh saga nay, neu 1 buoc nao do that bai, he thong xuat ban 1 su kien boi hoan de cac service truoc do dao nguoc lai -> he thong co kha nang tu chua lanh
+### 12.3.2. At-rest encryption
 
-3 Schema: hop dong du lieu
+Mã hóa dữ liệu khi lưu trên đĩa để giảm rủi ro khi thiết bị lưu trữ bị lộ.
 
-- Schema khong chi la cau truc du lieu - no la 1 hop dong ve su tin tuong giua cac doi -> vai tro cua schema registry: giong nhu 1 nguoi thu thu quan ly phien ban, dam bao rang tat ca cac phien ban deu tuan thu theo cung 1 nguyen tac tuong thich, de cac service cu hieu cac message tu cac service moi va nguoc lai
+---
 
-4 Thiet ke tin nhan an toan
-Loai | Dac diem
-Su kien | Mo ta dieu gi do da xay ra
-Lenh | Yeu cau dieu gi do nen duoc lam
+## 12.4. Checklist thực hành
 
-Idempotency: thuoc tinh cua 1 hoat dong co the duoc ap dung nhieu lan ma khong lam thay doi ket qua ban dau
-Cach dat duoc idempotency: co nhieu ky thuat: don gian nhat la luu lai id cua 1 su kien, truoc khi xu ly 1 su kien moi, ta kiem tra xem id cua su kien ay da duoc xu ly hay chua, neu roi thi thoi, bo qua
+1. Bật TLS để mã hóa traffic
+2. Dùng cơ chế xác thực an toàn như SCRAM hoặc Kerberos khi phù hợp
+3. Áp ACL nghiêm ngặt
+4. Mã hóa dữ liệu lưu trữ khi cần
+5. Xoay vòng chứng chỉ định kỳ
+
+> **Kết luận:** Bảo mật không phải là một tham số cấu hình đơn lẻ. Đó là một **văn hóa vận hành an toàn**. fileciteturn3file0L246-L263
+
+---
+
+# 13. Scaling và Performance Tuning
+
+## 13.1. Partition: chìa khóa xử lý song song
+
+Partition là đơn vị song song cơ bản của topic Kafka.
+
+### 13.1.1. Gợi ý khởi đầu
+
+- Có thể bắt đầu với quy tắc thực dụng: **1 partition cho mỗi ~1 MB/s thông lượng**
+- Tăng dần khi consumer bị trễ hoặc broker quá tải
+
+### 13.1.2. Thực hành tốt
+
+- Dùng partition key như `user_id` để duy trì thứ tự
+- Có thể dùng custom partitioner để phân phối đều hơn
+
+> **Lưu ý:** Một partition là đơn vị tạo tốc độ, nhưng cũng có thể là đơn vị tạo hỗn loạn nếu không được thiết kế cẩn thận.
+
+---
+
+## 13.2. Tối ưu Producer
+
+| Cấu hình | Mục đích | Giá trị đề xuất ban đầu |
+|---|---|---|
+| `batch.size` | Kích thước lô dữ liệu | 32 KB – 64 KB |
+| `linger.ms` | Chờ gom batch | 5 – 20 ms |
+| `compression.type` | Giảm kích thước dữ liệu | `lz4` hoặc `zstd` |
+| `acks` | Độ tin cậy ghi | `1` hoặc `all` |
+| `max.in.flight.requests.per.connection` | Số request song song | 5 – 10 |
+
+### 13.2.1. Mẹo cho producer
+
+- Bật idempotence để tránh trùng lặp khi retry
+- Dùng gửi bất đồng bộ `send()`
+- Theo dõi `RecordSendRate` và `RequestLatencyAvg`
+
+---
+
+## 13.3. Tăng tốc Consumer
+
+### 13.3.1. Quy tắc cơ bản
+
+Số lượng consumer hữu ích trong một group **không nên vượt quá số partition**, vì consumer dư sẽ không có partition nào để đọc.
+
+### 13.3.2. Cách tăng thông lượng
+
+1. Tăng số partition
+2. Tăng số lượng consumer trong cùng group
+3. Tách logic xử lý nặng ra luồng hoặc hệ xử lý riêng
+
+---
+
+## 13.4. Nền tảng hạ tầng
+
+| Hạng mục | Khuyến nghị |
+|---|---|
+| Broker | Bắt đầu với 3 broker để có HA |
+| Disk | SSD hoặc NVMe |
+| Mạng | 10–25 Gbps cho cluster lớn |
+| Replication | Factor = 3 là điểm cân bằng tốt |
+| Giám sát | Theo dõi `UnderReplicatedPartitions`, `RequestLatency` |
+
+> **Lưu ý:** Khi tuning Kafka, hãy tối ưu theo **nút thắt cổ chai thực sự**: producer, consumer, broker, disk hay network. Không nên tối ưu theo cảm tính. fileciteturn3file0L264-L289
+
+---
+
+# 14. Vận hành Kafka trong thực tế
+
+## 14.1. Mô hình triển khai
+
+| Mô hình | Ưu điểm | Nhược điểm |
+|---|---|---|
+| Bare-metal / on-prem | Kiểm soát cao | Quản trị phức tạp |
+| Cloud managed | Dễ mở rộng, nhanh đưa vào sử dụng | Chi phí có thể cao hơn |
+
+> **Mục tiêu thực tế:** Nếu sản phẩm cần ra thị trường nhanh, dịch vụ managed thường là lựa chọn tốt hơn.
+
+---
+
+## 14.2. Nâng cấp không gián đoạn
+
+### 14.2.1. Rolling Upgrade
+
+1. Dừng một broker
+2. Nâng cấp binary hoặc config
+3. Khởi động lại broker và kiểm tra
+4. Lặp lại cho các broker còn lại
+
+> **Lưu ý quan trọng:** Nâng cấp cuốn chiếu là cách giữ hệ thống “sống” trong khi vẫn thay đổi dần.
+
+---
+
+## 14.3. Phục hồi sau thảm họa
+
+### 14.3.1. Geo-replication
+
+Sao chép dữ liệu giữa các cluster ở những vị trí địa lý khác nhau để tăng khả năng phục hồi thảm họa.
+
+### 14.3.2. Công cụ phổ biến
+
+| Công cụ | Loại | Use case |
+|---|---|---|
+| MirrorMaker 2.0 | Apache Kafka | Replicate topic |
+| Confluent Replicator | Enterprise | DR nâng cao, đồng bộ ACL |
+
+---
+
+## 14.4. Backup và di chuyển dữ liệu
+
+Các chiến lược thường thấy:
+
+- Sao lưu log ra đĩa hoặc object storage như S3
+- Snapshot metadata
+- Lập kế hoạch restore định kỳ
+- Tập dượt migration
+
+---
+
+## 14.5. Quy tắc vận hành vàng
+
+1. Theo dõi các chỉ số quan trọng
+2. Kiểm tra compatibility trước khi upgrade
+3. Có ít nhất một phương án DR
+4. Tự động hóa deployment
+5. Diễn tập failover định kỳ
+
+> **Lưu ý:** Điều khiến một cụm Kafka mạnh không chỉ là cấu hình đẹp, mà là khả năng được kiểm chứng qua các buổi diễn tập lỗi thật. fileciteturn3file0L290-L312
+
+---
+
+# 15. Kafka trong kiến trúc microservices
+
+## 15.1. Đồng bộ vs bất đồng bộ
+
+### 15.1.1. Giao tiếp đồng bộ
+
+Ví dụ: Service A gọi HTTP sang Service B và phải chờ trả lời.
+
+Ưu điểm:
+
+- Dễ hiểu
+- Dễ debug ban đầu
+
+Nhược điểm:
+
+- Phụ thuộc chặt
+- Dễ gây nghẽn chuỗi gọi
+- Khó mở rộng
+
+### 15.1.2. Giao tiếp bất đồng bộ với Kafka
+
+Service A phát event vào Kafka, các service khác sẽ xử lý khi sẵn sàng.
+
+Ưu điểm:
+
+- Linh hoạt hơn
+- Tách rời hơn
+- Dễ mở rộng hơn
+
+---
+
+## 15.2. Event-driven architecture
+
+Các service giao tiếp bằng cách phát và tiêu thụ sự kiện mà không cần biết trực tiếp về nhau.
+
+---
+
+## 15.3. Saga pattern
+
+Kafka rất phù hợp để hiện thực Saga trong hệ thống phân tán.
+
+### 15.3.1. Hai mô hình chính
+
+| Mô hình | Cách hoạt động | Ưu điểm | Nhược điểm |
+|---|---|---|---|
+| Choreography | Service phát event kích hoạt service kế tiếp | Đơn giản, không có điều phối viên | Khó theo dõi luồng phức tạp |
+| Orchestration | Có điều phối viên trung tâm ra lệnh | Dễ quản lý, logic rõ ràng | Phụ thuộc vào điều phối viên |
+
+Nếu một bước thất bại, hệ thống có thể phát sự kiện bù hoàn để đảo ngược các bước trước đó.
+
+---
+
+## 15.4. Schema: hợp đồng dữ liệu
+
+Schema không chỉ là cấu trúc dữ liệu, mà là hợp đồng tin cậy giữa các đội.
+
+### 15.4.1. Vai trò của Schema Registry
+
+Schema Registry giống như một “thủ thư quản lý phiên bản”, giúp:
+
+- Kiểm soát tương thích dữ liệu
+- Hỗ trợ tiến hóa schema
+- Giảm rủi ro service cũ không hiểu message mới
+
+---
+
+## 15.5. Thiết kế message an toàn
+
+### 15.5.1. Sự kiện và lệnh
+
+| Loại | Đặc điểm |
+|---|---|
+| Event | Mô tả điều gì đó đã xảy ra |
+| Command | Yêu cầu điều gì đó nên được làm |
+
+### 15.5.2. Idempotency
+
+Idempotency là khả năng xử lý lặp lại nhiều lần mà không làm thay đổi kết quả cuối cùng.
+
+Một kỹ thuật phổ biến là:
+
+- Lưu lại `event_id`
+- Trước khi xử lý event mới, kiểm tra xem ID đó đã được xử lý chưa
+- Nếu đã xử lý rồi thì bỏ qua
+
+> **Lưu ý quan trọng:** Trong microservices, Kafka giúp tách rời hệ thống, nhưng chính idempotency, schema compatibility và saga design mới quyết định hệ thống có thực sự an toàn hay không. fileciteturn3file0L313-L332
+
+---
+
+# 16. Tóm tắt nhanh các nguyên tắc vàng
+
+## 16.1. Nguyên tắc kiến trúc
+
+- Dùng partition để mở rộng song song
+- Dùng replication để tăng độ bền
+- Dùng consumer group để chia tải
+- Dùng key nhất quán để giữ thứ tự trong phạm vi cần thiết
+
+## 16.2. Nguyên tắc an toàn dữ liệu
+
+- `acks=all`
+- `min.insync.replicas` hợp lý
+- `enable.idempotence=true`
+- Manual commit hoặc commit có kiểm soát
+- Dùng dead-letter queue khi cần
+
+## 16.3. Nguyên tắc hiệu năng
+
+- Tận dụng batch
+- Dùng nén
+- Theo dõi disk I/O và network
+- Dùng SSD/NVMe cho workload nặng
+- Chỉ tăng partition khi thật sự cần
+
+## 16.4. Nguyên tắc vận hành
+
+- Tối thiểu 3 broker cho HA
+- Theo dõi ISR, replica lag, latency
+- Diễn tập failover định kỳ
+- Chuẩn bị DR và backup
+- Nâng cấp theo rolling upgrade
+
+## 16.5. Nguyên tắc bảo mật
+
+- Bật TLS khi cần bảo vệ traffic
+- Xác thực bằng SASL/SCRAM hoặc cơ chế phù hợp
+- Áp ACL theo nguyên tắc ít quyền nhất
+- Quản lý chứng chỉ và bí mật nghiêm ngặt
+
+---
+
+# 17. Kết luận
+
+Kafka mạnh vì nó kết hợp được nhiều yếu tố tưởng như mâu thuẫn:
+
+- Nhanh nhưng vẫn bền
+- Linh hoạt nhưng vẫn có cấu trúc
+- Mở rộng lớn nhưng vẫn kiểm soát được
+- Phù hợp cả hạ tầng dữ liệu lẫn microservices
+
+Tuy nhiên, Kafka **không tự động an toàn chỉ vì được cài lên**.  
+Giá trị thật của Kafka chỉ xuất hiện khi người vận hành hiểu rõ:
+
+- Cơ chế log
+- Replication
+- Offset
+- Partition
+- Bảo mật
+- Tuning
+- Failover
+- Quy trình vận hành thực chiến
+
+> **Thông điệp cuối:** Kafka không chỉ là công cụ truyền message. Kafka là một **nền tảng dữ liệu thời gian thực** và là một **triết lý thiết kế hệ thống phân tán**.
 

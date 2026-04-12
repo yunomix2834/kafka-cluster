@@ -1,0 +1,35 @@
+docker run -d \
+  --name kafka \
+  --user 1001 \
+  --restart unless-stopped \
+  --ulimit nofile=100000:100000 \
+  --memory=3500m \
+  --memory-swap=7000m \
+  -p 7071:7071 \
+  -p 9092:9092 \
+  -p 9093:9093 \
+  -v /var/lib/kafka/data:/bitnami/kafka/data:rw \
+  -v /opt/guest-agent/etc/kafka_client.conf:/etc/kafka_client.conf:rw \
+  -v /etc/kafka/config/kafka_jaas.conf:/opt/bitnami/kafka/config/kafka_jaas.conf:rw \
+  -e KAFKA_CFG_PROCESS_ROLES='controller,broker' \
+  -e KAFKA_CFG_CONTROLLER_LISTENER_NAMES='CONTROLLER' \
+  -e KAFKA_CFG_BROKER_ID='0' \
+  -e KAFKA_CFG_NODE_ID='0' \
+  -e KAFKA_KRAFT_CLUSTER_ID='3dd86896-6318-403a-ac1c-bb34036ac82f' \
+  -e KAFKA_CFG_LISTENERS='CONTROLLER://:9093,SASL_PLAINTEXT://:9092' \
+  -e KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP='CONTROLLER:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT' \
+  -e KAFKA_CFG_CONTROLLER_QUORUM_VOTERS='0@10.60.68.211:9093,1@10.60.68.242:9093,2@10.60.68.32:9093' \
+  -e KAFKA_CFG_ADVERTISED_LISTENERS='SASL_PLAINTEXT://10.60.68.211:9092' \
+  -e KAFKA_CFG_SECURITY_INTER_BROKER_PROTOCOL='SASL_PLAINTEXT' \
+  -e KAFKA_CFG_SASL_ENABLED_MECHANISMS='PLAIN' \
+  -e KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL='PLAIN' \
+  -e KAFKA_CFG_SUPER_USERS='User:admin' \
+  -e KAFKA_OPTS='-Djava.security.auth.login.config=/opt/bitnami/kafka/config/kafka_jaas.conf' \
+  -e JMX_PORT='2020' \
+  -e KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE='true' \
+  -e KAFKA_CFG_DEFAULT_REPLICATION_FACTOR='3' \
+  -e KAFKA_CFG_MIN_INSYNC_REPLICAS='2' \
+  -e KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR='3' \
+  -e KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR='3' \
+  -e KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR='2' \
+  registry2.cloud.cmctelecom.vn/rnd_db/kafka:3.7
