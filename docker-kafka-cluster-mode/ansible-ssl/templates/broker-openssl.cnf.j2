@@ -1,0 +1,22 @@
+[ req ]
+prompt = no
+default_bits = 2048
+default_md = sha256
+distinguished_name = dn
+req_extensions = req_ext
+
+[ dn ]
+C = {{ tls_cert_country }}
+ST = {{ tls_cert_state }}
+L = {{ tls_cert_locality }}
+O = {{ tls_cert_org }}
+OU = {{ tls_cert_ou }}
+CN = {{ advertised_ip | default(ansible_host) }}
+
+[ req_ext ]
+subjectAltName = @alt_names
+extendedKeyUsage = serverAuth,clientAuth
+
+[ alt_names ]
+IP.1 = {{ advertised_ip | default(ansible_host) }}
+DNS.1 = {{ inventory_hostname }}

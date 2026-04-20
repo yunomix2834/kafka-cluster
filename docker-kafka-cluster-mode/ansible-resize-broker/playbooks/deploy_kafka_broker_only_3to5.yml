@@ -1,0 +1,117 @@
+---
+- name: Deploy Kafka broker-only nodes for lab resize 3 -> 5
+  hosts: kafka_new_brokers
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Deploy broker-only container with diagnostics
+      block:
+        - name: Assert kafka_node_id defined and > 2
+          ansible.builtin.assert:
+            that:
+              - kafka_node_id is defined
+              - (kafka_node_id | int) > 2
+            fail_msg: "Set kafka_node_id per host to 3 and 4 for this lab."
+
+        - name: Create directories
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner | default('root') }}"
+            group: "{{ item.group | default('root') }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - { path: '/var/lib/kafka/data', owner: '1001', group: 'root', mode: '0755' }
+            - { path: '/opt/guest-agent/etc', owner: 'root', group: 'root', mode: '0755' }
+            - { path: '/etc/kafka/config', owner: 'root', group: 'root', mode: '0755' }
+
+        - name: Ensure Kafka data dir is writable by container uid 1001
+          ansible.builtin.file:
+            path: "{{ kafka_data_dir }}"
+            state: directory
+            owner: '1001'
+            group: 'root'
+            mode: '0755'
+            recurse: true
+
+        - name: Copy kafka client config
+          ansible.builtin.copy:
+            src: ../files/kafka_client.conf
+            dest: "{{ kafka_client_conf_host_path }}"
+            mode: '0644'
+
+        - name: Copy kafka jaas config
+          ansible.builtin.copy:
+            src: ../files/kafka_jaas.conf
+            dest: "{{ kafka_jaas_conf_host_path }}"
+            mode: '0644'
+
+        - name: Render docker run resize-broker
+          ansible.builtin.template:
+            src: ../templates/docker-run-kafka-broker-only.sh.j2
+            dest: /usr/local/bin/run_kafka_database.sh
+            mode: '0755'
+
+        - name: Recreate database container
+          ansible.builtin.command: /usr/local/bin/run_kafka_database.sh
+          register: run_out
+          changed_when: true
+
+        - name: Wait for container to stay running
+          ansible.builtin.command: docker inspect -f '{{"{{.State.Status}}"}}' {{ kafka_container_name }}
+          register: container_state
+          changed_when: false
+          retries: 20
+          delay: 3
+          until: container_state.stdout == 'running'
+
+        - name: Wait for broker port 9092
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: 9092
+            delay: 2
+            timeout: 90
+
+        - name: Inspect container
+          ansible.builtin.command: docker inspect {{ kafka_container_name }}
+          register: inspect_out
+          changed_when: false
+
+        - name: Show short inspect summary
+          ansible.builtin.debug:
+            msg:
+              - "host={{ inventory_hostname }} ansible_host={{ ansible_host }} advertised_ip={{ advertised_ip | default(ansible_host) }} node_id={{ kafka_node_id }}"
+              - "container={{ kafka_container_name }} image={{ kafka_image }}"
+
+      rescue:
+        - name: Show docker ps -a for failed host
+          ansible.builtin.command: docker ps -a --filter name={{ kafka_container_name }}
+          register: docker_psa
+          changed_when: false
+          failed_when: false
+
+        - name: Show docker inspect state for failed host
+          ansible.builtin.command: >-
+            docker inspect -f
+            'status={{"{{.State.Status}}"}} exit={{"{{.State.ExitCode}}"}} error={{"{{.State.Error}}"}} started={{"{{.State.StartedAt}}"}}'
+            {{ kafka_container_name }}
+          register: docker_inspect_state
+          changed_when: false
+          failed_when: false
+
+        - name: Show docker logs tail for failed host
+          ansible.builtin.command: docker logs --tail 200 {{ kafka_container_name }}
+          register: docker_logs_tail
+          changed_when: false
+          failed_when: false
+
+        - name: Print diagnostics for failed host
+          ansible.builtin.debug:
+            msg:
+              - "docker_psa={{ docker_psa.stdout_lines | default([]) }}"
+              - "docker_inspect_state={{ docker_inspect_state.stdout | default('') }}"
+              - "docker_logs_tail={{ docker_logs_tail.stdout_lines | default([]) }}"
+
+        - name: Fail deployment with diagnostics
+          ansible.builtin.fail:
+            msg: "Kafka broker-only deployment failed on {{ inventory_hostname }}. See docker diagnostics above."

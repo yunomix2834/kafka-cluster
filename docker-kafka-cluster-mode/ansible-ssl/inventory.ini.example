@@ -1,0 +1,4 @@
+[kafka_combined_nodes]
+kafka-0 ansible_host=10.10.10.100 kafka_node_id=0 advertised_ip=10.10.10.100 ansible_user=root ansible_password=CHANGE_ME ansible_ssh_common_args='-o ProxyJump=root@bastion-host'
+kafka-1 ansible_host=10.10.10.101 kafka_node_id=1 advertised_ip=10.10.10.101 ansible_user=root ansible_password=CHANGE_ME ansible_ssh_common_args='-o ProxyJump=root@bastion-host'
+kafka-2 ansible_host=10.10.10.102 kafka_node_id=2 advertised_ip=10.10.10.102 ansible_user=root ansible_password=CHANGE_ME ansible_ssh_common_args='-o ProxyJump=root@bastion-host'

@@ -1,0 +1,203 @@
+---
+- name: Deploy EXTERNAL SSL on existing combined Kafka nodes
+  hosts: kafka_combined_nodes
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Configure TLS assets and recreate Kafka container
+      block:
+        - name: Assert required host vars
+          ansible.builtin.assert:
+            that:
+              - kafka_node_id is defined
+              - ansible_host is defined
+
+        - name: Create directories
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner | default('root') }}"
+            group: "{{ item.group | default('root') }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - { path: "{{ kafka_data_dir }}", owner: "1001", group: "root", mode: "0755" }
+            - { path: "/opt/guest-agent/etc", owner: "root", group: "root", mode: "0755" }
+            - { path: "/etc/kafka/config", owner: "root", group: "root", mode: "0755" }
+            - { path: "{{ kafka_tls_remote_dir }}", owner: "root", group: "root", mode: "0700" }
+
+        - name: Ensure Kafka data dir is writable by uid 1001
+          ansible.builtin.file:
+            path: "{{ kafka_data_dir }}"
+            state: directory
+            owner: "1001"
+            group: "root"
+            mode: "0755"
+            recurse: true
+
+        - name: Copy kafka client config
+          ansible.builtin.copy:
+            src: ../files/kafka_client.conf
+            dest: "{{ kafka_client_conf_host_path }}"
+            mode: "0644"
+
+        - name: Copy kafka jaas config
+          ansible.builtin.copy:
+            src: ../files/kafka_jaas.conf
+            dest: "{{ kafka_jaas_conf_host_path }}"
+            mode: "0644"
+
+        - name: Copy CA certificate
+          ansible.builtin.copy:
+            src: "{{ kafka_tls_local_output_dir }}/ca/ca.crt"
+            dest: "{{ kafka_tls_remote_dir }}/ca.crt"
+            mode: "0644"
+
+        - name: Copy PKCS12 bundle for this broker
+          ansible.builtin.copy:
+            src: "{{ kafka_tls_local_output_dir }}/brokers/{{ inventory_hostname }}/{{ inventory_hostname }}.p12"
+            dest: "{{ kafka_tls_remote_dir }}/kafka.p12"
+            mode: "0600"
+
+        - name: Remove old JKS files if present
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ kafka_tls_remote_dir }}/kafka.keystore.jks"
+            - "{{ kafka_tls_remote_dir }}/kafka.truststore.jks"
+
+        - name: Convert PKCS12 to JKS keystore
+          ansible.builtin.command: >-
+            docker run --rm -u 0:0
+            -v {{ kafka_tls_remote_dir }}:/work/certs
+            --entrypoint /opt/bitnami/java/bin/keytool
+            {{ kafka_image }}
+            -importkeystore
+            -srckeystore /work/certs/kafka.p12
+            -srcstoretype PKCS12
+            -srcstorepass {{ kafka_tls_store_password }}
+            -srcalias {{ inventory_hostname }}
+            -destkeystore /work/certs/kafka.keystore.jks
+            -deststoretype JKS
+            -deststorepass {{ kafka_tls_store_password }}
+            -destkeypass {{ kafka_tls_store_password }}
+            -destalias {{ inventory_hostname }}
+            -noprompt
+          changed_when: true
+
+        - name: Build JKS truststore from CA
+          ansible.builtin.command: >-
+            docker run --rm -u 0:0
+            -v {{ kafka_tls_remote_dir }}:/work/certs
+            --entrypoint /opt/bitnami/java/bin/keytool
+            {{ kafka_image }}
+            -importcert
+            -alias CARoot
+            -keystore /work/certs/kafka.truststore.jks
+            -storetype JKS
+            -storepass {{ kafka_tls_store_password }}
+            -file /work/certs/ca.crt
+            -noprompt
+          changed_when: true
+
+        - name: Set permissions on cert files
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            owner: "{{ item.owner }}"
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - { path: "{{ kafka_tls_remote_dir }}", owner: "root", group: "root", mode: "0700" }
+            - { path: "{{ kafka_tls_remote_dir }}/kafka.keystore.jks", owner: "1001", group: "1001", mode: "0600" }
+            - { path: "{{ kafka_tls_remote_dir }}/kafka.truststore.jks", owner: "1001", group: "1001", mode: "0600" }
+            - { path: "{{ kafka_tls_remote_dir }}/kafka.p12", owner: "root", group: "root", mode: "0600" }
+            - { path: "{{ kafka_tls_remote_dir }}/ca.crt", owner: "root", group: "root", mode: "0644" }
+
+        - name: Render client SSL properties on host
+          ansible.builtin.template:
+            src: ../templates/client-ssl.properties.j2
+            dest: "{{ kafka_client_ssl_props_host_path }}"
+            mode: "0644"
+
+        - name: Save current docker inspect before restart
+          ansible.builtin.command: docker inspect {{ kafka_container_name }}
+          register: inspect_before
+          changed_when: false
+          failed_when: false
+
+        - name: Write inspect backup file
+          ansible.builtin.copy:
+            dest: "/root/{{ kafka_container_name }}.inspect.before_ssl.json"
+            content: "{{ inspect_before.stdout | default('') }}"
+            mode: "0600"
+
+        - name: Render docker run script for combined+SSL
+          ansible.builtin.template:
+            src: ../templates/docker-run-kafka-combined-ssl.sh.j2
+            dest: /usr/local/bin/run_kafka_database_ssl.sh
+            mode: "0755"
+
+        - name: Recreate database container with SSL on 9094
+          ansible.builtin.command: /usr/local/bin/run_kafka_database_ssl.sh
+          changed_when: true
+
+        - name: Wait for container to stay running
+          ansible.builtin.command: docker inspect -f '{{"{{.State.Status}}"}}' {{ kafka_container_name }}
+          register: container_state
+          changed_when: false
+          retries: 20
+          delay: 3
+          until: container_state.stdout == 'running'
+
+        - name: Wait for 9092
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: 9092
+            delay: 2
+            timeout: 90
+
+        - name: Wait for 9094
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: 9094
+            delay: 2
+            timeout: 90
+
+        - name: Show short summary
+          ansible.builtin.debug:
+            msg:
+              - "host={{ inventory_hostname }} ansible_host={{ ansible_host }} advertised_ip={{ advertised_ip | default(ansible_host) }} node_id={{ kafka_node_id }}"
+              - "ssl listener=EXTERNAL://{{ advertised_ip | default(ansible_host) }}:9094"
+
+      rescue:
+        - name: Show docker ps -a for failed host
+          ansible.builtin.command: docker ps -a --filter name={{ kafka_container_name }}
+          register: docker_psa
+          changed_when: false
+          failed_when: false
+
+        - name: Show docker inspect state for failed host
+          ansible.builtin.command: >-
+            docker inspect -f
+            'status={{"{{.State.Status}}"}} exit={{"{{.State.ExitCode}}"}} error={{"{{.State.Error}}"}} started={{"{{.State.StartedAt}}"}}'
+            {{ kafka_container_name }}
+          register: docker_inspect_state
+          changed_when: false
+          failed_when: false
+
+        - name: Show docker logs tail for failed host
+          ansible.builtin.command: docker logs --tail 200 {{ kafka_container_name }}
+          register: docker_logs_tail
+          changed_when: false
+          failed_when: false
+
+        - name: Print diagnostics for failed host
+          ansible.builtin.debug:
+            msg:
+              - "docker_psa={{ docker_psa.stdout_lines | default([]) }}"
+              - "docker_inspect_state={{ docker_inspect_state.stdout | default('') }}"
+              - "docker_logs_tail={{ docker_logs_tail.stdout_lines | default([]) }}"
+
+        - name: Fail deployment with diagnostics
+          ansible.builtin.fail:
+            msg: "SSL deployment failed on {{ inventory_hostname }}. Xem docker diagnostics ở trên."

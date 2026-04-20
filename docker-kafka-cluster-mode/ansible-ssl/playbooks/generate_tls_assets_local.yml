@@ -1,0 +1,107 @@
+---
+- name: Generate CA and broker TLS assets on control node / bastion
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    tls_output_dir: "{{ kafka_tls_local_output_dir }}"
+  tasks:
+    - name: Check openssl exists
+      ansible.builtin.command: openssl version
+      register: openssl_version
+      changed_when: false
+
+    - name: Create local output directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - "{{ tls_output_dir }}"
+        - "{{ tls_output_dir }}/ca"
+        - "{{ tls_output_dir }}/brokers"
+
+    - name: Create broker output directories
+      ansible.builtin.file:
+        path: "{{ tls_output_dir }}/brokers/{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: "{{ groups['kafka_combined_nodes'] }}"
+
+    - name: Generate CA private key
+      ansible.builtin.command: openssl genrsa -out {{ tls_output_dir }}/ca/ca.key 4096
+      args:
+        creates: "{{ tls_output_dir }}/ca/ca.key"
+
+    - name: Generate CA certificate
+      ansible.builtin.command: >-
+        openssl req -x509 -new -nodes
+        -key {{ tls_output_dir }}/ca/ca.key
+        -sha256
+        -days 3650
+        -out {{ tls_output_dir }}/ca/ca.crt
+        -subj /C={{ tls_cert_country }}/ST={{ tls_cert_state }}/L={{ tls_cert_locality }}/O={{ tls_cert_org }}/OU={{ tls_cert_ou }}/CN={{ tls_ca_common_name }}
+      args:
+        creates: "{{ tls_output_dir }}/ca/ca.crt"
+
+    - name: Render openssl config per broker
+      ansible.builtin.template:
+        src: ../templates/broker-openssl.cnf.j2
+        dest: "{{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.cnf"
+        mode: "0600"
+      loop: "{{ groups['kafka_combined_nodes'] }}"
+      vars:
+        ansible_host: "{{ hostvars[item].ansible_host }}"
+        advertised_ip: "{{ hostvars[item].advertised_ip | default(hostvars[item].ansible_host) }}"
+        inventory_hostname: "{{ item }}"
+
+    - name: Generate broker private key
+      ansible.builtin.command: openssl genrsa -out {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.key 2048
+      args:
+        creates: "{{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.key"
+      loop: "{{ groups['kafka_combined_nodes'] }}"
+
+    - name: Generate broker CSR
+      ansible.builtin.command: >-
+        openssl req -new
+        -key {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.key
+        -out {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.csr
+        -config {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.cnf
+      args:
+        creates: "{{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.csr"
+      loop: "{{ groups['kafka_combined_nodes'] }}"
+
+    - name: Sign broker certificate with CA
+      ansible.builtin.command: >-
+        openssl x509 -req
+        -in {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.csr
+        -CA {{ tls_output_dir }}/ca/ca.crt
+        -CAkey {{ tls_output_dir }}/ca/ca.key
+        -CAcreateserial
+        -out {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.crt
+        -days 825
+        -sha256
+        -extensions req_ext
+        -extfile {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.cnf
+      args:
+        creates: "{{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.crt"
+      loop: "{{ groups['kafka_combined_nodes'] }}"
+
+    - name: Build PKCS12 bundle per broker
+      ansible.builtin.command: >-
+        openssl pkcs12 -export
+        -name {{ item }}
+        -inkey {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.key
+        -in {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.crt
+        -certfile {{ tls_output_dir }}/ca/ca.crt
+        -out {{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.p12
+        -passout pass:{{ kafka_tls_store_password }}
+      args:
+        creates: "{{ tls_output_dir }}/brokers/{{ item }}/{{ item }}.p12"
+      loop: "{{ groups['kafka_combined_nodes'] }}"
+
+    - name: Show local artifact summary
+      ansible.builtin.debug:
+        msg:
+          - "CA: {{ tls_output_dir }}/ca/ca.crt"
+          - "PKCS12: {{ tls_output_dir }}/brokers/<broker>/<broker>.p12"

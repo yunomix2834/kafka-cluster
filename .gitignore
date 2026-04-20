@@ -1,0 +1,209 @@
+# =========================
+# OS / System files
+# =========================
+.DS_Store
+Thumbs.db
+Desktop.ini
+Icon?
+$RECYCLE.BIN/
+.Trashes/
+.fseventsd
+
+# =========================
+# Editor / IDE
+# =========================
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+*.suo
+*.user
+*.userossc
+*.sln.docstates
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# =========================
+# Environment / secrets
+# =========================
+.env
+.env.*
+*.local
+*.secret
+*.secrets
+secrets.*
+*.key
+*.pem
+*.crt
+*.p12
+*.jks
+*.keystore
+
+# =========================
+# Archives / packaged files
+# =========================
+*.7z
+*.gz
+*.zip
+*.tar
+*.tgz
+*.bz2
+*.rar
+
+# =========================
+# Temporary files / caches
+# =========================
+tmp/
+temp/
+.cache/
+.cache-loader/
+.eslintcache
+.stylelintcache
+.parcel-cache/
+coverage/
+dist/
+build/
+out/
+target/
+release/
+debug/
+
+# =========================
+# Dependency directories
+# =========================
+node_modules/
+vendor/
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+htmlcov/
+.eggs/
+*.egg-info/
+
+# =========================
+# Java / Kotlin / Gradle
+# =========================
+.gradle/
+.gradle-cache/
+*.class
+
+# =========================
+# Maven
+# =========================
+target/
+
+# =========================
+# Go
+# =========================
+bin/
+.coverprofile
+
+# =========================
+# Rust
+# =========================
+target/
+# Giữ Cargo.lock cho ứng dụng, bỏ dòng dưới nếu là app
+Cargo.lock
+
+# =========================
+# .NET
+# =========================
+bin/
+obj/
+
+# =========================
+# C / C++ / CMake
+# =========================
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+Makefile
+makedep*
+libtool
+aclocal.m4
+m4/
+autom4te.cache/
+
+# =========================
+# Swift / Xcode
+# =========================
+.build/
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcuserdatad/
+*.xcuserstate
+
+# =========================
+# Terraform
+# =========================
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# =========================
+# Serverless / cloud tools
+# =========================
+.serverless/
+.aws-sam/
+
+# =========================
+# Docker
+# =========================
+*.pid
+*.seed
+
+# =========================
+# Test / report outputs
+# =========================
+junit.xml
+report.xml
+reports/
+allure-results/
+allure-report/
+
+# =========================
+# Misc generated files
+# =========================
+*.tmp
+*.bak
+*.orig
+*.rej
