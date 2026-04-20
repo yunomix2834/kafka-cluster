@@ -1,0 +1,37 @@
+kafka_image: bitnamilegacy/kafka:3.7
+kafka_container_name: database
+kafka_cluster_id: 4907e64e-aa5d-401b-9385-ac86b5784b3b
+kafka_controller_quorum_voters: "0@10.10.10.100:9093,1@10.10.10.101:9093,2@10.10.10.102:9093"
+
+kafka_process_roles: broker
+kafka_controller_listener_names: CONTROLLER
+kafka_listeners: SASL_PLAINTEXT://:9092
+kafka_listener_security_protocol_map: CONTROLLER:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT
+kafka_advertised_listener_proto: SASL_PLAINTEXT
+kafka_security_inter_broker_protocol: SASL_PLAINTEXT
+kafka_sasl_enabled_mechanisms: PLAIN
+kafka_sasl_mechanism_inter_broker_protocol: PLAIN
+kafka_super_users: User:admin
+kafka_opts: -Djava.security.auth.login.config=/opt/bitnami/kafka/config/kafka_jaas.conf
+kafka_jmx_port: "2020"
+kafka_extra_args: -javaagent:/jmx/jmx_prometheus_javaagent-1.0.1.jar=7071:/jmx/config.yaml
+kafka_auto_create_topics_enable: "true"
+kafka_default_replication_factor: "3"
+kafka_min_insync_replicas: "2"
+kafka_offsets_topic_replication_factor: "3"
+kafka_txn_state_log_replication_factor: "3"
+kafka_txn_state_log_min_isr: "2"
+
+kafka_memory: 3500m
+kafka_memory_swap: 7000m
+kafka_ulimit_nofile: "100000:100000"
+
+kafka_data_dir: /var/lib/kafka/data
+kafka_client_conf_host_path: /opt/guest-agent/etc/kafka_client.conf
+kafka_jaas_conf_host_path: /etc/kafka/config/kafka_jaas.conf
+
+kafka_publish_jmx_agent_port: true
+kafka_publish_broker_port: true
+kafka_publish_controller_port: false
+
+kafka_restart_policy_name: "no"
